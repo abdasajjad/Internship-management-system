@@ -12,7 +12,6 @@ const FacultyDashboard = () => {
     const { user, logout } = useAuth();
     const [internships, setInternships] = useState([]);
     const [applications, setApplications] = useState([]);
-
     const [newInternship, setNewInternship] = useState({
         title: '', company: '', description: '', location: '', duration: '', department: ''
     });
