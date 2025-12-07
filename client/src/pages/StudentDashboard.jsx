@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_URL from '../config';
 import { useAuth } from '../context/AuthContext';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -23,7 +24,7 @@ const StudentDashboard = () => {
 
     const fetchInternships = async () => {
         try {
-            const res = await axios.get(`http://localhost:5000/api/internships?company=${search}`);
+            const res = await axios.get(`${API_URL}/api/internships?company=${search}`);
             setInternships(res.data);
         } catch (err) {
             console.error("Error fetching internships", err);
@@ -32,7 +33,7 @@ const StudentDashboard = () => {
 
     const fetchMyApplications = async () => {
         try {
-            const res = await axios.get('http://localhost:5000/api/applications/my');
+            const res = await axios.get(`${API_URL}/api/applications/my`);
             setMyApplications(res.data);
         } catch (err) {
             console.error("Error fetching applications", err);
@@ -44,7 +45,7 @@ const StudentDashboard = () => {
         if (resumeFile) formData.append('resume', resumeFile);
 
         try {
-            await axios.post(`http://localhost:5000/api/applications/${internshipId}/apply`, formData, {
+            await axios.post(`${API_URL}/api/applications/${internshipId}/apply`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             alert("Applied successfully!");
@@ -59,7 +60,7 @@ const StudentDashboard = () => {
         if (certFile) formData.append('certificate', certFile);
 
         try {
-            await axios.post(`http://localhost:5000/api/applications/${appId}/certificate`, formData, {
+            await axios.post(`${API_URL}/api/applications/${appId}/certificate`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             alert("Certificate uploaded!");
@@ -139,7 +140,7 @@ const StudentDashboard = () => {
                                             <TableCell>{app.internship.company}</TableCell>
                                             <TableCell>
                                                 <span className={`px-2 py-1 rounded text-sm ${app.status === 'approved' ? 'bg-green-100 text-green-800' :
-                                                        app.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
+                                                    app.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'
                                                     }`}>
                                                     {app.status}
                                                 </span>

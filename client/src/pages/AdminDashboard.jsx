@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_URL from '../config';
 import { useAuth } from '../context/AuthContext';
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -21,7 +22,7 @@ const AdminDashboard = () => {
         try {
             // We need an endpoint for this. 
             // I'll create it in backend, but for now client code:
-            // const res = await axios.get('http://localhost:5000/api/auth/users');
+            // const res = await axios.get(`${API_URL}/api/auth/users`);
             // setUsers(res.data);
             console.log("Fetching users...");
         } catch (err) {

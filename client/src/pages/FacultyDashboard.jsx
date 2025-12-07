@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_URL from '../config';
 import { useAuth } from '../context/AuthContext';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +23,7 @@ const FacultyDashboard = () => {
 
     const fetchMyInternships = async () => {
         try {
-            const res = await axios.get('http://localhost:5000/api/internships');
+            const res = await axios.get(`${API_URL}/api/internships`);
             // Filter by postedBy if user.id matches. 
             const myInts = res.data.filter(i => i.postedBy._id === user._id);
             setInternships(myInts);
@@ -34,7 +35,7 @@ const FacultyDashboard = () => {
     const handlePostInternship = async (e) => {
         e.preventDefault();
         try {
-            await axios.post('http://localhost:5000/api/internships', newInternship);
+            await axios.post(`${API_URL}/api/internships`, newInternship);
             alert("Internship Posted!");
             setNewInternship({ title: '', company: '', description: '', location: '', duration: '', department: '' });
             fetchMyInternships();
@@ -45,7 +46,7 @@ const FacultyDashboard = () => {
 
     const viewApplications = async (internshipId) => {
         try {
-            const res = await axios.get(`http://localhost:5000/api/applications/internship/${internshipId}`);
+            const res = await axios.get(`${API_URL}/api/applications/internship/${internshipId}`);
             setApplications(res.data);
         } catch (err) {
             alert("Error loading applications");
@@ -54,7 +55,7 @@ const FacultyDashboard = () => {
 
     const updateStatus = async (appId, status) => {
         try {
-            await axios.put(`http://localhost:5000/api/applications/${appId}/status`, { status });
+            await axios.put(`${API_URL}/api/applications/${appId}/status`, { status });
             // Refresh applications list locally
             setApplications(applications.map(app => app._id === appId ? { ...app, status } : app));
         } catch (err) {
@@ -64,7 +65,7 @@ const FacultyDashboard = () => {
 
     const verifyCert = async (appId, status) => {
         try {
-            await axios.put(`http://localhost:5000/api/applications/${appId}/certificate-verify`, { status });
+            await axios.put(`${API_URL}/api/applications/${appId}/certificate-verify`, { status });
             setApplications(applications.map(app => app._id === appId ? { ...app, certificateStatus: status } : app));
         } catch (err) {
             console.error(err);
@@ -136,13 +137,13 @@ const FacultyDashboard = () => {
                                                 <TableCell>
                                                     <div>{app.student.name}</div>
                                                     <div className="text-xs text-gray-500">{app.student.email}</div>
-                                                    {app.resumeSnapshot && <a href={`http://localhost:5000/${app.resumeSnapshot}`} target="_blank" className="text-blue-500 text-xs underline">View Resume</a>}
+                                                    {app.resumeSnapshot && <a href={`${API_URL}/${app.resumeSnapshot}`} target="_blank" className="text-blue-500 text-xs underline">View Resume</a>}
                                                 </TableCell>
                                                 <TableCell>{app.status}</TableCell>
                                                 <TableCell>
                                                     {app.certificate ? (
                                                         <div className="flex flex-col">
-                                                            <a href={`http://localhost:5000/${app.certificate}`} target="_blank" className="text-blue-500 underline text-xs">View API</a>
+                                                            <a href={`${API_URL}/${app.certificate}`} target="_blank" className="text-blue-500 underline text-xs">View API</a>
                                                             <span className="text-xs">{app.certificateStatus}</span>
                                                             <div className="flex gap-1 mt-1">
                                                                 {app.certificateStatus !== 'verified' && (
