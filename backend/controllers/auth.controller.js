@@ -5,6 +5,17 @@ const jwt = require('jsonwebtoken');
 const PUBLIC_SIGNUP_ROLE = 'student';
 const ADMIN_CREATABLE_ROLES = ['student', 'faculty'];
 
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const isValidEmail = (email) => {
+    const v = normalizeEmail(email);
+    // Reasonable validation (not full RFC). Good enough for UI/account integrity.
+    // - one @
+    // - no spaces
+    // - domain contains a dot
+    // - TLD length >= 2
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
+};
+
 const buildAuthUser = (user) => ({
     _id: user.id,
     name: user.name,
@@ -23,11 +34,16 @@ exports.register = async (req, res) => {
             return res.status(400).json({ message: 'Name, email and password are required' });
         }
 
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ message: 'Please enter a valid email address' });
+        }
+
         if (role && role !== PUBLIC_SIGNUP_ROLE) {
             return res.status(403).json({ message: 'Public signup is available for students only' });
         }
 
-        let user = await User.findOne({ email });
+        const normalizedEmail = normalizeEmail(email);
+        let user = await User.findOne({ email: normalizedEmail });
         if (user) {
             return res.status(400).json({ message: 'User already exists' });
         }
@@ -37,14 +53,13 @@ exports.register = async (req, res) => {
 
         user = new User({
             name,
-            email,
+            email: normalizedEmail,
             password: hashedPassword,
             role: PUBLIC_SIGNUP_ROLE,
             department,
             securityQuestion: securityQuestion || '',
             securityAnswer: securityAnswer || ''
         });
-
         await user.save();
 
         const payload = {
@@ -68,11 +83,15 @@ exports.register = async (req, res) => {
 };
 
 exports.createUserByAdmin = async (req, res) => {
-    const { name, email, password, role, department } = req.body;
+    const { name, email, password, role, department, securityQuestion, securityAnswer } = req.body;
 
     try {
         if (!name || !email || !password || !role) {
             return res.status(400).json({ message: 'Name, email, password and role are required' });
+        }
+
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ message: 'Please enter a valid email address' });
         }
 
         if (!ADMIN_CREATABLE_ROLES.includes(role)) {
@@ -83,7 +102,8 @@ exports.createUserByAdmin = async (req, res) => {
             return res.status(400).json({ message: 'Department is required for students' });
         }
 
-        let user = await User.findOne({ email });
+        const normalizedEmail = normalizeEmail(email);
+        let user = await User.findOne({ email: normalizedEmail });
         if (user) {
             return res.status(400).json({ message: 'User already exists' });
         }
@@ -93,10 +113,12 @@ exports.createUserByAdmin = async (req, res) => {
 
         user = new User({
             name,
-            email,
+            email: normalizedEmail,
             password: hashedPassword,
             role,
-            department: role === 'student' ? department : undefined
+            department: role === 'student' ? department : undefined,
+            securityQuestion: securityQuestion || '',
+            securityAnswer: securityAnswer || ''
         });
 
         await user.save();
@@ -112,7 +134,8 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     try {
-        let user = await User.findOne({ email });
+        const normalizedEmail = normalizeEmail(email);
+        let user = await User.findOne({ email: normalizedEmail });
         if (!user) {
             return res.status(400).json({ message: 'Invalid Credentials' });
         }
@@ -141,6 +164,7 @@ exports.login = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 };
+
 
 exports.getMe = async (req, res) => {
     try {
@@ -215,7 +239,8 @@ exports.verifySecurityAnswer = async (req, res) => {
             return res.status(400).json({ message: 'Email and security answer are required' });
         }
 
-        const user = await User.findOne({ email });
+        const normalizedEmail = normalizeEmail(email);
+        const user = await User.findOne({ email: normalizedEmail });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -251,7 +276,8 @@ exports.getSecurityQuestion = async (req, res) => {
             return res.status(400).json({ message: 'Email is required' });
         }
 
-        const user = await User.findOne({ email });
+        const normalizedEmail = normalizeEmail(email);
+        const user = await User.findOne({ email: normalizedEmail });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
@@ -288,7 +314,8 @@ exports.resetPasswordWithSecurity = async (req, res) => {
             return res.status(400).json({ message: 'Password must be at least 6 characters' });
         }
 
-        const user = await User.findOne({ email });
+        const normalizedEmail = normalizeEmail(email);
+        const user = await User.findOne({ email: normalizedEmail });
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }

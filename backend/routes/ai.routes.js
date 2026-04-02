@@ -3,6 +3,7 @@ const router = express.Router();
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const crypto = require('crypto');
 const AiCache = require('../models/AiCache');
+const { analyzeResume } = require('../utils/geminiAI');
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 const buildCacheKey = (type, payload) => {
@@ -66,15 +67,18 @@ router.post('/analyze-resume', async (req, res) => {
             return res.status(500).json({ error: 'AI service not configured' });
         }
 
-        const ai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        // Keep analysis generic (no internship context) so students can see
+        // improvement points immediately after upload.
+        const analysis = await analyzeResume(resumeText, {
+            title: 'Internship',
+            requiredSkills: []
+        });
 
-        const model = ai.getGenerativeModel({ model: GEMINI_MODEL });
-        const response = await model.generateContent(
-            `Analyze this resume and provide constructive feedback and suggestions for improvement. Be concise and professional.\n\nResume:\n${resumeText}`
-        );
-
-        const feedback = response?.response?.text?.() || '';
-        const payload = { feedback };
+        // Frontend expects `summary` and `improvements`.
+        const payload = {
+            ...analysis,
+            feedback: analysis.summary || ''
+        };
         await AiCache.findOneAndUpdate(
             { key: cacheKey },
             { key: cacheKey, type: 'analyze-resume', payload },
@@ -86,9 +90,22 @@ router.post('/analyze-resume', async (req, res) => {
         console.error('AI Error:', error);
 
         const message = String(error?.message || 'Unknown AI error');
-        if (message.includes('429') || message.toLowerCase().includes('quota')) {
+        if (message.includes('429') || message.toLowerCase().includes('quota') || message.toLowerCase().includes('rate limit')) {
+            const fallbackText = generateFallbackFeedback(resumeText);
+            const improvements = String(fallbackText)
+                .split('\n')
+                .map(l => l.trim())
+                .filter(l => l.startsWith('- '))
+                .slice(0, 3)
+                .map(l => l.replace(/^-+\s?/, '').trim());
+
             const payload = {
-                feedback: generateFallbackFeedback(resumeText),
+                score: 50,
+                summary: 'AI analysis is temporarily unavailable. Here are quick improvement suggestions.',
+                strengths: [],
+                improvements,
+                recommendation: 'moderate_match',
+                feedback: fallbackText,
                 warning: 'Gemini quota exceeded. Returned fallback analysis.'
             };
 

@@ -49,6 +49,28 @@ const internshipSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    isCompleted: {
+        type: Boolean,
+        default: false
+    },
+    completedAt: {
+        type: Date,
+        default: null
+    },
+    // Faculty/Admin who marked this internship as completed (for certificate signing)
+    completedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    completedByName: {
+        type: String,
+        default: null
+    },
+    completedByEmail: {
+        type: String,
+        default: null
+    },
     createdAt: {
         type: Date,
         default: Date.now

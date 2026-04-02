@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, Link, useParams } from 'react-router-dom';
 import React, { useState, useEffect } from 'react';
 import { User, Internship, Application, Role } from './store';
 import { Briefcase, User as UserIcon, LogOut, FileText, BrainCircuit, PlusCircle, Users, Sparkles, ArrowRight, UploadCloud, CheckCircle2, XCircle, Mail, Lock, GraduationCap, Trash2, Plus, AlertCircle, Bell } from 'lucide-react';
@@ -86,6 +86,10 @@ const normalizeInternship = (raw: any): Internship => ({
   })(),
   deadlineAt: raw?.deadlineAt ? String(raw.deadlineAt) : '',
   isClosed: Boolean(raw?.isClosed),
+  isCompleted: Boolean(raw?.isCompleted),
+  completedAt: raw?.completedAt ? String(raw.completedAt) : null,
+  completedByName: raw?.completedByName ?? null,
+  completedByEmail: raw?.completedByEmail ?? null,
   notificationArchivedAt: raw?.notificationArchivedAt || null,
   createdAt: raw?.createdAt || new Date().toISOString()
 });
@@ -225,6 +229,7 @@ function ChangePasswordModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, 
                   <input
                     type="password"
                     required
+                    autoComplete="off"
                     value={oldPassword}
                     onChange={e => setOldPassword(e.target.value)}
                     className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
@@ -242,6 +247,7 @@ function ChangePasswordModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, 
                   <input
                     type="password"
                     required
+                    autoComplete="off"
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
                     className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
@@ -259,6 +265,7 @@ function ChangePasswordModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, 
                   <input
                     type="password"
                     required
+                    autoComplete="off"
                     value={confirmPassword}
                     onChange={e => setConfirmPassword(e.target.value)}
                     className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
@@ -302,6 +309,264 @@ function ChangePasswordModal({ isOpen, onClose, onSuccess }: { isOpen: boolean, 
   );
 }
 
+function ForgotPasswordModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  const [email, setEmail] = useState('');
+  const [securityQuestion, setSecurityQuestion] = useState('');
+  const [securityAnswer, setSecurityAnswer] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const [step, setStep] = useState<'email' | 'question' | 'reset' | 'done'>('email');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setEmail('');
+    setSecurityQuestion('');
+    setSecurityAnswer('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setStep('email');
+    setError('');
+    setSuccess('');
+    setIsLoading(false);
+  }, [isOpen]);
+
+  const handleGetQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/get-security-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const data = await readJsonSafely(res);
+      if (!res.ok) throw new Error(data.message || data.error || 'Failed to get security question');
+      setSecurityQuestion(String(data.securityQuestion || ''));
+      setStep('question');
+    } catch (err: any) {
+      setError(err.message || 'Failed to get security question');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVerifyAnswer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/verify-security-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, securityAnswer })
+      });
+      const data = await readJsonSafely(res);
+      if (!res.ok) throw new Error(data.message || data.error || 'Failed to verify security answer');
+      setStep('reset');
+    } catch (err: any) {
+      setError(err.message || 'Failed to verify security answer');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setIsLoading(true);
+    try {
+      if (newPassword !== confirmPassword) {
+        throw new Error('Passwords do not match');
+      }
+      const res = await fetch('/api/auth/reset-password-security', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, newPassword, confirmPassword })
+      });
+      const data = await readJsonSafely(res);
+      if (!res.ok) throw new Error(data.message || data.error || 'Failed to reset password');
+      setSuccess(data.message || 'Password reset successfully.');
+      setStep('done');
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset password');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <AnimatePresence>
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <motion.div
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.95, opacity: 0 }}
+          className="bg-white rounded-2xl shadow-xl max-w-md w-full"
+        >
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-slate-900">Forgot Password</h2>
+              <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+
+            {step !== 'done' && (
+              <p className="text-sm text-slate-600 mb-4">
+                {step === 'email' && 'Enter your email to retrieve your security question.'}
+                {step === 'question' && 'Answer your security question to continue.'}
+                {step === 'reset' && 'Set a new password.'}
+              </p>
+            )}
+
+            {step === 'email' && (
+              <form onSubmit={handleGetQuestion} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Email address</label>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    autoComplete="off"
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="you@example.com"
+                  />
+                </div>
+
+                {error && (
+                  <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <Button type="submit" disabled={isLoading} className="w-full">
+                    {isLoading ? 'Please wait...' : 'Continue'}
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {step === 'question' && (
+              <form onSubmit={handleVerifyAnswer} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Security Question</label>
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-800">
+                    {securityQuestion || 'Security question not loaded'}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Security Answer</label>
+                  <input
+                    type="text"
+                    required
+                    value={securityAnswer}
+                    onChange={e => setSecurityAnswer(e.target.value)}
+                    autoComplete="off"
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="Enter your answer"
+                  />
+                </div>
+
+                {error && (
+                  <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <Button variant="outline" type="button" onClick={() => setStep('email')} className="flex-1">
+                    Back
+                  </Button>
+                  <Button type="submit" disabled={isLoading} className="flex-1">
+                    {isLoading ? 'Verifying...' : 'Verify'}
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {step === 'reset' && (
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">New Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    autoComplete="off"
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="New password"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Confirm New Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    autoComplete="off"
+                    className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    placeholder="Confirm password"
+                  />
+                </div>
+
+                {error && (
+                  <div className="p-3 bg-red-50 text-red-700 text-sm rounded-lg border border-red-100">
+                    {error}
+                  </div>
+                )}
+
+                {success && (
+                  <div className="p-3 bg-emerald-50 text-emerald-700 text-sm rounded-lg border border-emerald-100">
+                    {success}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <Button variant="outline" type="button" onClick={() => setStep('question')} className="flex-1" disabled={isLoading}>
+                    Back
+                  </Button>
+                  <Button type="submit" disabled={isLoading} className="flex-1">
+                    {isLoading ? 'Resetting...' : 'Reset Password'}
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {step === 'done' && (
+              <div className="space-y-3">
+                <div className="p-3 bg-emerald-50 text-emerald-700 text-sm rounded-lg border border-emerald-100">
+                  {success || 'Password reset successfully.'}
+                </div>
+                <div className="flex justify-end pt-2">
+                  <Button onClick={onClose} className="w-full">
+                    Close
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
+      </div>
+    </AnimatePresence>
+  );
+}
+
 // --- Screens ---
 
 function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
@@ -310,9 +575,12 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [department, setDepartment] = useState('');
+  const [securityQuestion, setSecurityQuestion] = useState('');
+  const [securityAnswer, setSecurityAnswer] = useState('');
   const [role, setRole] = useState<Role>('student');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isForgotOpen, setIsForgotOpen] = useState(false);
 
 
 
@@ -322,8 +590,21 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
     setIsLoading(true);
 
     try {
+      const emailToValidate = String(email || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailToValidate)) {
+        throw new Error('Please enter a valid email address');
+      }
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
-      const body = isLogin ? { email, password } : { name, email, password, role, department: role === 'student' ? department : undefined };
+      const body = isLogin ? { email, password } : {
+        name,
+        email,
+        password,
+        role,
+        department: role === 'student' ? department : undefined,
+        // Needed for the "Forgot password" flow.
+        securityQuestion,
+        securityAnswer
+      };
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -339,9 +620,14 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
         throw new Error(errorMsg);
       }
 
-      // Extract user and token from response (response contains { token, user })
-      const userData = data.user || data;
-      onLogin({ ...userData, token: data.token });
+      if (isLogin) {
+        // Extract user and token from response (response contains { token, user })
+        const userData = data.user || data;
+        onLogin({ ...userData, token: data.token });
+      } else {
+        setIsLogin(true);
+        setError('Account created successfully. Please log in.');
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -446,6 +732,33 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
                     </div>
                   </div>
                 )}
+
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Security Question</label>
+                    <input
+                      type="text"
+                      required
+                      value={securityQuestion}
+                      onChange={e => setSecurityQuestion(e.target.value)}
+                      className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      placeholder="e.g. What is your favorite teacher?"
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Security Answer</label>
+                    <input
+                      type="text"
+                      required
+                      value={securityAnswer}
+                      onChange={e => setSecurityAnswer(e.target.value)}
+                      className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                      placeholder="Enter your answer"
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
               </>
             )}
 
@@ -460,6 +773,7 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
                   required
                   value={email}
                   onChange={e => setEmail(e.target.value)}
+                  autoComplete="off"
                   className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                   placeholder="you@example.com"
                 />
@@ -477,11 +791,24 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
                   required
                   value={password}
                   onChange={e => setPassword(e.target.value)}
+                  autoComplete="off"
                   className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
                   placeholder="••••••••"
                 />
               </div>
             </div>
+
+            {isLogin && (
+              <div className="flex justify-end -mt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsForgotOpen(true)}
+                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-500"
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
 
             {!isLogin && (
               <>
@@ -499,6 +826,8 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
             </Button>
           </form>
 
+          <ForgotPasswordModal isOpen={isForgotOpen} onClose={() => setIsForgotOpen(false)} />
+
           <div className="mt-6 text-center">
             <p className="text-sm text-slate-600">
               {isLogin ? "Don't have an account? " : "Already have an account? "}
@@ -514,16 +843,6 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
             </p>
           </div>
 
-          {isLogin && (
-            <div className="mt-8 pt-6 border-t border-slate-200">
-              <p className="text-xs text-slate-500 text-center mb-4">Demo Accounts </p>
-              <div className="flex justify-center gap-2">
-                <button onClick={() => {setEmail('student@gmail.com'); setPassword('Rishalsh@786');}} className="text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">Student</button>
-                <button onClick={() => {setEmail('faculty@gmail.com'); setPassword('Rishalsh@786');}} className="text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">Faculty</button>
-                <button onClick={() => {setEmail('admin@example.com'); setPassword('Rishalsh@786');}} className="text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">Admin</button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -636,9 +955,9 @@ function Layout({ user, onLogout, notifications = [], onClearNotifications, isCh
                 </div>
               </div>
               <div className="h-6 w-px bg-slate-200" />
-              <button onClick={onChangePasswordToggle} className="text-slate-400 hover:text-slate-600 transition-colors" title="Change password">
-                <Lock className="h-5 w-5" />
-              </button>
+              <Link to={`/profile/${user.id}`} className="text-slate-400 hover:text-slate-600 transition-colors" title="Profile" aria-label="Profile">
+                <UserIcon className="h-5 w-5" />
+              </Link>
               <div className="h-6 w-px bg-slate-200" />
               <button onClick={onLogout} className="text-slate-400 hover:text-slate-600 transition-colors" title="Log out">
                 <LogOut className="h-5 w-5" />
@@ -652,6 +971,146 @@ function Layout({ user, onLogout, notifications = [], onClearNotifications, isCh
           {children}
         </motion.div>
       </main>
+    </div>
+  );
+}
+
+function ProfilePage({ currentUser, onRequestChangePassword }: { currentUser: User; onRequestChangePassword: () => void }) {
+  const params = useParams();
+  const targetId = String((params as any).id || currentUser.id);
+
+  const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/users/${targetId}`);
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data?.message || data?.error || 'Failed to load profile');
+          return;
+        }
+        setProfile(data);
+      } catch (e: any) {
+        if (cancelled) return;
+        setError(e?.message || 'Failed to load profile');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [targetId]);
+
+  if (loading) {
+    return (
+      <div className="max-w-3xl mx-auto text-sm text-slate-600">
+        Loading profile...
+      </div>
+    );
+  }
+
+  if (error || !profile) {
+    return (
+      <div className="max-w-3xl mx-auto space-y-4">
+        <Button variant="ghost" onClick={() => window.history.back()}>
+          ← Back
+        </Button>
+        <Card className="p-6 text-sm text-slate-600">{error || 'Profile not found.'}</Card>
+      </div>
+    );
+  }
+
+  const name = profile?.name || 'Unknown User';
+  const email = profile?.email || '';
+  const role = profile?.role || 'student';
+  const department = profile?.department || 'N/A';
+  const createdAt = profile?.createdAt ? new Date(profile.createdAt).toLocaleDateString() : 'N/A';
+
+  const resumeText = typeof profile?.resumeText === 'string' ? profile.resumeText : '';
+  const resumePreview = resumeText
+    ? resumeText.slice(0, 650) + (resumeText.length > 650 ? '...' : '')
+    : '';
+
+  return (
+    <div className="max-w-3xl mx-auto space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Profile</h1>
+          <p className="text-sm text-slate-600 capitalize">{role}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => window.history.back()}>
+            Back
+          </Button>
+        </div>
+      </div>
+
+      <Card className="p-6 space-y-5">
+        <div className="flex items-center gap-4">
+          <div className="h-12 w-12 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-200">
+            <span className="text-lg font-bold text-indigo-700">{name.charAt(0)}</span>
+          </div>
+          <div>
+            <p className="text-lg font-bold text-slate-900">{name}</p>
+            <p className="text-sm text-slate-600">{email}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <p className="text-xs text-slate-500">Role</p>
+            <p className="font-semibold text-slate-900">{role}</p>
+          </div>
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <p className="text-xs text-slate-500">Department</p>
+            <p className="font-semibold text-slate-900">{department}</p>
+          </div>
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <p className="text-xs text-slate-500">Joined</p>
+            <p className="font-semibold text-slate-900">{createdAt}</p>
+          </div>
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <p className="text-xs text-slate-500">Resume</p>
+            <p className="font-semibold text-slate-900">{resumeText ? 'Uploaded' : 'Not uploaded'}</p>
+          </div>
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl sm:col-span-2 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs text-slate-500">Password</p>
+              <p className="font-semibold text-slate-900">Update your password securely</p>
+            </div>
+            {String(targetId) === String(currentUser.id) ? (
+              <Button variant="outline" onClick={onRequestChangePassword}>
+                Change Password
+              </Button>
+            ) : (
+              <span className="text-xs text-slate-500">Only you can change your password</span>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-slate-900">Resume Text (preview)</p>
+          {resumePreview ? (
+            <pre className="text-xs whitespace-pre-wrap bg-white border border-slate-200 rounded-xl p-3 text-slate-700 overflow-auto max-h-64">
+              {resumePreview}
+            </pre>
+          ) : (
+            <p className="text-sm text-slate-500">No resume text available.</p>
+          )}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -681,6 +1140,21 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
   recommendation?: string;
 } | null>(null);
 
+  // Quick (non-elaborate) improvements shown immediately after resume upload
+  const [uploadedQuickAnalysis, setUploadedQuickAnalysis] = useState<{
+    score: number | null;
+    summary: string;
+    improvements: string[];
+  } | null>(null);
+  const [isQuickAnalyzing, setIsQuickAnalyzing] = useState(false);
+
+  // Certificate signing/verification details shown alongside the PDF link
+  const [completionCertificateSignature, setCompletionCertificateSignature] = useState<{
+    signerName: string;
+    signedAt: string;
+    verificationCode: string;
+  } | null>(null);
+
 
   useEffect(() => {
     fetch('/api/internships')
@@ -701,7 +1175,7 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
       });
   }, [user.id]);
 
-  // Calculate notifications about FACULTY ACTIONS (for students)
+    // Calculate notifications about FACULTY ACTIONS (for students)
   useEffect(() => {
     const notificationsList: { id: string; text: string; variant: 'success' | 'danger' | 'warning' }[] = [];
 
@@ -709,7 +1183,13 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
       // Skip archived notifications
       if (internship.notificationArchivedAt) return;
 
-      if (internship.isClosed) {
+      if (internship.isCompleted) {
+        notificationsList.push({
+          id: `${internship.id}-completed`,
+          text: `${internship.title} has been marked completed by faculty.`,
+          variant: 'warning'
+        });
+      } else if (internship.isClosed) {
         notificationsList.push({
           id: `${internship.id}-closed`,
           text: `${internship.title} has been closed by faculty.`,
@@ -767,6 +1247,74 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
     onNotificationsChange?.(notificationsList);
   }, [applications, internships, onNotificationsChange]);
 
+  // Compute signature/verification summary to display when the student opens the certificate.
+  useEffect(() => {
+    let cancelled = false;
+
+    const compute = async () => {
+      if (!selectedApplicationId) {
+        setCompletionCertificateSignature(null);
+        return;
+      }
+
+      const app = applications.find(a => a.id === selectedApplicationId);
+      if (!app?.internshipCompletionCertificate) {
+        setCompletionCertificateSignature(null);
+        return;
+      }
+
+      const internship = internships.find(i => i.id === app.internshipId);
+      if (!internship) {
+        setCompletionCertificateSignature(null);
+        return;
+      }
+
+      const signerName = internship.completedByName || 'Faculty / Program Coordinator';
+      const signerEmail = internship.completedByEmail || null;
+      const parsedCompletedAt = internship.completedAt ? new Date(String(internship.completedAt)) : new Date();
+      const sigDate = Number.isNaN(parsedCompletedAt.getTime()) ? new Date() : parsedCompletedAt;
+
+      const verificationPayload = `${app.id}|${signerEmail || signerName}|${sigDate.toISOString()}`;
+
+      try {
+        if (!window.crypto?.subtle) {
+          throw new Error('WebCrypto not available');
+        }
+
+        const digest = await window.crypto.subtle.digest(
+          'SHA-256',
+          new TextEncoder().encode(verificationPayload)
+        );
+        const hex = Array.from(new Uint8Array(digest))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+        const verificationCode = hex.slice(0, 14).toUpperCase();
+
+        if (!cancelled) {
+          setCompletionCertificateSignature({
+            signerName,
+            signedAt: sigDate.toLocaleDateString(),
+            verificationCode
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setCompletionCertificateSignature({
+            signerName,
+            signedAt: sigDate.toLocaleDateString(),
+            verificationCode: 'N/A'
+          });
+        }
+      }
+    };
+
+    compute();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedApplicationId, applications, internships]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -800,11 +1348,40 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
         throw new Error(data.details ? `${data.message} (${data.details})` : (data.message || data.error || 'Failed to upload resume'));
       }
 
-      setResumeText(data.text || '');
+      const uploadedText = data.text || '';
+      setResumeText(uploadedText);
       if (data.user) {
         onUpdateUser(normalizeUser(data.user));
       }
+
+      // Show quick improvement points right after upload (no elaborate dashboard).
+      setUploadedQuickAnalysis(null);
+      setAiAnalysisData(null);
       setAiFeedback('');
+
+      if (uploadedText.trim()) {
+        setIsQuickAnalyzing(true);
+        try {
+          const quickRes = await fetch('/api/ai/analyze-resume', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resumeText: uploadedText })
+          });
+          const quickData = await readJsonSafely(quickRes);
+          if (quickRes.ok && quickData) {
+            setUploadedQuickAnalysis({
+              score: typeof quickData.score === 'number' ? quickData.score : null,
+              summary: quickData.summary || '',
+              improvements: Array.isArray(quickData.improvements) ? quickData.improvements.slice(0, 3) : []
+            });
+          }
+        } catch (aiErr) {
+          // Resume upload should not fail if the quick AI suggestions fail.
+          console.warn('Quick AI suggestions failed:', aiErr);
+        } finally {
+          setIsQuickAnalyzing(false);
+        }
+      }
     } catch (err) {
       console.error(err);
       alert((err as Error).message || 'Resume upload failed');
@@ -857,6 +1434,11 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
       new Date(String(selectedInternship.deadlineAt)).getTime() < Date.now();
     if (deadlinePassed) {
       alert('This internship deadline has passed and no longer accepts applications.');
+      return;
+    }
+    const completed = Boolean(selectedInternship.isCompleted);
+    if (completed) {
+      alert('This internship has been marked completed by the faculty.');
       return;
     }
     setIsApplying(true);
@@ -986,10 +1568,13 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
         throw new Error(data.message || data.error || 'Failed to generate certificate');
       }
 
-      setApplications(apps => apps.map(a => a.id === applicationId ? normalizeApplication(data) : a));
+      const normalized = normalizeApplication(data);
+      setApplications(apps => apps.map(a => a.id === applicationId ? normalized : a));
+      return normalized;
     } catch (e) {
       console.error(e);
       alert((e as Error).message || 'Failed to generate certificate');
+      return null;
     } finally {
       setIsGeneratingCertificate(false);
     }
@@ -1028,6 +1613,7 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
   };
 
   const getDisplayStatus = (app: Application, internship?: Internship) => {
+    if (internship?.isCompleted) return 'completed';
     if (internship?.isClosed) return 'closed';
     return app.status;
   };
@@ -1164,41 +1750,56 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
             </div>
 
             {selectedApplication.internshipCompletionCertificate ? (
-              <a
-                href={`/${selectedApplication.internshipCompletionCertificate}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block w-full text-center text-sm font-medium py-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 hover:bg-indigo-100 transition-colors"
-              >
-                View Certificate (PDF)
-              </a>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {completionCertificateSignature && (
+                  <div className="sm:col-span-2 p-3 bg-white border border-slate-200 rounded-xl">
+                    <p className="text-xs text-slate-600">
+                      Digitally signed by <span className="font-semibold text-slate-900">{completionCertificateSignature.signerName}</span>
+                    </p>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Signed on <span className="font-medium text-slate-900">{completionCertificateSignature.signedAt}</span>
+                    </p>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Verification Code: <span className="font-mono font-semibold text-slate-900">{completionCertificateSignature.verificationCode}</span>
+                    </p>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const certPath = selectedApplication.internshipCompletionCertificate;
+                    if (!certPath) return;
+
+                    // Regenerate on view so the certificate always includes the
+                    // latest signature/verification block.
+                    const updated = await completeInternship(selectedApplication.id);
+                    const updatedCertPath = updated?.internshipCompletionCertificate || certPath;
+                    window.open(`/${updatedCertPath}`, '_blank', 'noopener,noreferrer');
+                  }}
+                  disabled={isGeneratingCertificate}
+                  className="block w-full text-center text-sm font-medium py-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-60"
+                >
+                  {isGeneratingCertificate ? 'Generating...' : 'View Certificate (PDF)'}
+                </button>
+              </div>
             ) : (
               <div className="space-y-2">
                 <p className="text-sm text-slate-600">
-                  Upload your internship completion proof. The internship completion certificate PDF will be generated automatically.
+                  Your internship completion certificate will be generated after the faculty marks the internship as completed.
                 </p>
 
-                {selectedApplication.status === 'approved' ? (
-                  <div className="space-y-2">
-                    <input
-                      type="file"
-                      accept="application/pdf"
-                      onChange={e => setCompletionProofFile(e.target.files?.[0] || null)}
-                      disabled={isUploadingCompletionProof}
-                      className="w-full p-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
-                    <Button
-                      onClick={() => uploadCompletionProof(selectedApplication.id)}
-                      disabled={isUploadingCompletionProof || !completionProofFile}
-                      className="w-full"
-                      size="sm"
-                    >
-                      {isUploadingCompletionProof ? 'Uploading...' : 'Upload & Generate Certificate'}
-                    </Button>
-                  </div>
+                {selectedApplication.status === 'approved' && internship?.isCompleted ? (
+                  <Button
+                    onClick={() => completeInternship(selectedApplication.id)}
+                    disabled={isGeneratingCertificate}
+                    className="w-full"
+                    size="sm"
+                  >
+                    {isGeneratingCertificate ? 'Generating...' : 'Generate & Download'}
+                  </Button>
                 ) : (
                   <Button size="sm" variant="secondary" className="w-full" disabled>
-                    Only approved internships can be completed
+                    Waiting for faculty completion
                   </Button>
                 )}
               </div>
@@ -1225,6 +1826,7 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
   if (selectedInternship) {
     const deadlinePassed = Boolean(selectedInternship.deadlineAt) &&
       new Date(String(selectedInternship.deadlineAt)).getTime() < Date.now();
+    const completed = Boolean(selectedInternship.isCompleted);
     return (
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex items-center space-x-4">
@@ -1264,9 +1866,14 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
               This internship deadline has passed, so you cannot apply.
             </div>
           )}
+          {completed && (
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700">
+              This internship has been marked completed by the faculty, so you cannot apply.
+            </div>
+          )}
 
           <div className="flex items-center justify-end space-x-4 pt-4 border-t border-slate-100">
-            <Button onClick={apply} disabled={isApplying || !resumeText || deadlinePassed} size="lg">
+            <Button onClick={apply} disabled={isApplying || !resumeText || deadlinePassed || completed} size="lg">
               {isApplying ? 'Submitting...' : 'Submit Application'}
             </Button>
           </div>
@@ -1305,7 +1912,8 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                       </div>
                       <Badge variant={
                         statusValue === 'approved' ? 'success' :
-                        statusValue === 'rejected' ? 'danger' : 'warning'
+                        statusValue === 'rejected' ? 'danger' :
+                        statusValue === 'completed' ? 'ai' : 'warning'
                       }>
                         {statusValue.charAt(0).toUpperCase() + statusValue.slice(1)}
                       </Badge>
@@ -1377,7 +1985,7 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
           <h1 className="text-2xl font-bold text-slate-900">Discover Internships</h1>
         </div>
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {internships.filter(i => !i.isClosed).map(internship => {
+          {internships.filter(i => !i.isClosed || i.isCompleted).map(internship => {
             const myApplication = applications.find(a => a.internshipId === internship.id);
             const hasApplied = Boolean(myApplication);
             const internshipSkills = internship.requiredSkills || [];
@@ -1385,6 +1993,12 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
             const deadlineText = internship.deadlineAt
               ? new Date(String(internship.deadlineAt)).toLocaleString()
               : '';
+            const completed = Boolean(internship.isCompleted);
+            const normalizeDept = (v: any) => String(v || '').trim().toLowerCase();
+            const internshipDept = normalizeDept(internship.department);
+            const studentDept = normalizeDept(user.department);
+            const deptRestricted = internshipDept && internshipDept !== 'n/a';
+            const deptMismatch = deptRestricted && internshipDept !== studentDept;
             return (
               <Card key={internship.id} className="flex flex-col group hover:border-indigo-200 transition-colors">
                 <div className="p-6 flex-1 flex flex-col">
@@ -1405,6 +2019,14 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                     <div className="mb-4">
                       <Badge variant={deadlinePassed ? 'danger' : 'warning'} className="whitespace-normal">
                         Deadline: {deadlineText}
+                      </Badge>
+                    </div>
+                  )}
+
+                  {completed && (
+                    <div className="mb-4">
+                      <Badge variant="ai" className="whitespace-normal">
+                        Completed
                       </Badge>
                     </div>
                   )}
@@ -1440,7 +2062,11 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                     </a>
                   )}
                   <div>
-                    {hasApplied ? (
+                    {completed ? (
+                      <Button variant="secondary" className="w-full" disabled>
+                        Completed
+                      </Button>
+                    ) : hasApplied ? (
                       <Button variant="secondary" className="w-full" disabled>
                         <CheckCircle2 className="w-4 h-4 mr-2" />
                         {myApplication?.status === 'pending' ? 'Pending' : myApplication?.status === 'rejected' ? 'Rejected' : 'Applied'}
@@ -1448,6 +2074,15 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                     ) : deadlinePassed ? (
                       <Button variant="secondary" className="w-full" disabled>
                         Deadline passed
+                      </Button>
+                    ) : deptMismatch ? (
+                      <Button
+                        variant="secondary"
+                        className="w-full"
+                        disabled
+                        title={`Only ${internship.department} department students can apply`}
+                      >
+                        Department restricted
                       </Button>
                     ) : (
                       <Button className="w-full" onClick={() => setSelectedInternship(internship)}>
@@ -1490,6 +2125,18 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                 </Button>
               </div>
               {resumeText && <span className="text-sm text-green-600 font-medium flex items-center"><CheckCircle2 className="w-4 h-4 mr-1"/> Resume Uploaded</span>}
+              {uploadedQuickAnalysis?.improvements?.length ? (
+                <div className="mt-3 p-3 bg-white border border-slate-200 rounded-xl w-full">
+                  <p className="text-xs font-semibold text-slate-900 mb-2">Suggested improvements</p>
+                  <ul className="space-y-1.5 list-disc list-inside">
+                    {uploadedQuickAnalysis.improvements.map((imp, idx) => (
+                      <li key={idx} className="text-sm text-slate-700">{imp}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : isQuickAnalyzing ? (
+                <p className="mt-3 text-xs text-slate-500">Generating improvement points...</p>
+              ) : null}
             </div>
 
             <div className="flex justify-end pt-2">
@@ -1632,6 +2279,29 @@ function FacultyDashboard({ user, onNotificationsChange }: { user: User, onNotif
     } catch (e) {
       console.error(e);
       alert((e as Error).message || 'Failed to close internship');
+    }
+  };
+
+  const completeInternship = async (internshipId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers: any = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`/api/internships/${internshipId}/complete`, {
+        method: 'PUT',
+        headers
+      });
+
+      if (!res.ok) {
+        const data = await readJsonSafely(res);
+        throw new Error(data.message || 'Failed to mark internship completed');
+      }
+
+      fetchData();
+    } catch (e) {
+      console.error(e);
+      alert((e as Error).message || 'Failed to mark internship completed');
     }
   };
 
@@ -2038,8 +2708,8 @@ function FacultyDashboard({ user, onNotificationsChange }: { user: User, onNotif
                         <h3 className="font-semibold text-slate-900 text-lg">{internship.title}</h3>
                         <p className="text-sm text-slate-500 mt-1">Posted {new Date(internship.createdAt).toLocaleDateString()}</p>
                       </div>
-                      <Badge variant={internship.isClosed ? 'default' : 'success'}>
-                        {internship.isClosed ? 'Closed' : 'Open'}
+                      <Badge variant={internship.isCompleted ? 'ai' : (internship.isClosed ? 'default' : 'success')}>
+                        {internship.isCompleted ? 'Completed' : (internship.isClosed ? 'Closed' : 'Open')}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between text-sm mb-4">
@@ -2060,6 +2730,20 @@ function FacultyDashboard({ user, onNotificationsChange }: { user: User, onNotif
                       >
                        <Sparkles className="w-4 h-4 mr-1.5" /> Best Applicants
                       </Button>
+                      {!internship.isCompleted && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            if (window.confirm('Mark this internship as completed?')) {
+                              completeInternship(internship.id);
+                            }
+                          }}
+                          className="border-violet-200 text-violet-700 hover:bg-violet-50"
+                        >
+                          Mark Completed
+                        </Button>
+                      )}
                       {!internship.isClosed && (
                         <Button
                           size="sm"
@@ -2212,6 +2896,8 @@ function AdminDashboard() {
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<Role>('student');
   const [newUserDepartment, setNewUserDepartment] = useState('');
+  const [newUserSecurityQuestion, setNewUserSecurityQuestion] = useState('');
+  const [newUserSecurityAnswer, setNewUserSecurityAnswer] = useState('');
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [addUserError, setAddUserError] = useState('');
 
@@ -2298,7 +2984,10 @@ function AdminDashboard() {
           email: newUserEmail,
           password: newUserPassword,
           role: newUserRole,
-          department: newUserRole === 'student' ? newUserDepartment : undefined
+          department: newUserRole === 'student' ? newUserDepartment : undefined,
+          // Needed for the forgot-password flow
+          securityQuestion: newUserSecurityQuestion,
+          securityAnswer: newUserSecurityAnswer
         })
       });
       const data = await readJsonSafely(res);
@@ -2310,6 +2999,8 @@ function AdminDashboard() {
       setNewUserPassword('');
       setNewUserRole('student');
       setNewUserDepartment('');
+      setNewUserSecurityQuestion('');
+      setNewUserSecurityAnswer('');
       fetchData();
     } catch (err: any) {
       console.error(err);
@@ -2359,7 +3050,15 @@ function AdminDashboard() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Password</label>
-                <input type="password" required value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="••••••••" />
+                <input
+                  type="password"
+                  required
+                  value={newUserPassword}
+                  onChange={e => setNewUserPassword(e.target.value)}
+                  autoComplete="off"
+                  className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  placeholder="••••••••"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Role</label>
@@ -2374,6 +3073,32 @@ function AdminDashboard() {
                   <input type="text" required value={newUserDepartment} onChange={e => setNewUserDepartment(e.target.value)} className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Computer Science" />
                 </div>
               )}
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Security Question</label>
+                <input
+                  type="text"
+                  required
+                  value={newUserSecurityQuestion}
+                  onChange={e => setNewUserSecurityQuestion(e.target.value)}
+                  className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  placeholder="e.g. What is your favorite teacher?"
+                  autoComplete="off"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Security Answer</label>
+                <input
+                  type="text"
+                  required
+                  value={newUserSecurityAnswer}
+                  onChange={e => setNewUserSecurityAnswer(e.target.value)}
+                  className="block w-full px-3 py-2 border border-slate-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                  placeholder="Enter your answer"
+                  autoComplete="off"
+                />
+              </div>
             </div>
             <div className="flex justify-end pt-2">
               <Button type="submit" disabled={isAddingUser}>
@@ -2641,6 +3366,10 @@ export default function App() {
             currentUser.role === 'faculty' ? <FacultyDashboard user={currentUser} onNotificationsChange={setFacultyNotifications} /> :
             <AdminDashboard />
           } />
+          <Route
+            path="/profile/:id?"
+            element={<ProfilePage currentUser={currentUser} onRequestChangePassword={() => setIsChangePasswordOpen(true)} />}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

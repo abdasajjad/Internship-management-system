@@ -1,6 +1,9 @@
 const Internship = require('../models/Internship');
 const Application = require('../models/Application');
+const User = require('../models/User');
 const path = require('path');
+const fsSync = require('fs');
+const { generateInternshipCompletionCertificatePdf } = require('../utils/certificateGenerator');
 
 // Multer provides either relative paths like `uploads/<file>.pdf` or absolute paths
 // (especially on Windows). We normalize to a URL path that matches:
@@ -209,10 +212,106 @@ exports.closeInternship = async (req, res) => {
             return res.status(401).json({ message: 'Not authorized' });
         }
 
+        // Backward-compat: older internships may not have deadlineAt (added later).
+        // Keep deadline required for new posts, but allow closing legacy records.
+        if (!internship.deadlineAt) {
+            internship.deadlineAt = new Date();
+        }
+
         if (!internship.isClosed) {
             internship.isClosed = true;
             internship.closedAt = new Date();
             await internship.save();
+        }
+
+        res.json(internship);
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).json({ message: 'Server error' });
+    }
+};
+
+// @desc    Mark internship as completed (no new applications)
+// @route   PUT /api/internships/:id/complete
+// @access  Private (Faculty/Admin)
+exports.completeInternship = async (req, res) => {
+    try {
+        let internship = await Internship.findById(req.params.id);
+        if (!internship) return res.status(404).json({ message: 'Internship not found' });
+
+        // Ensure user is owner or admin
+        if (internship.postedBy.toString() !== req.user.id && req.user.role !== 'admin') {
+            return res.status(401).json({ message: 'Not authorized' });
+        }
+
+        // Backward-compat: older internships may not have deadlineAt (added later).
+        // Keep deadline required for new posts, but allow completing legacy records.
+        if (!internship.deadlineAt) {
+            internship.deadlineAt = new Date();
+        }
+
+        if (!internship.isCompleted) {
+            internship.isCompleted = true;
+            internship.completedAt = new Date();
+        }
+
+        // Save the signer for digital signature (faculty/admin completing the internship).
+        const signerUser = req.user?.id
+            ? await User.findById(req.user.id).select('name email')
+            : null;
+        internship.completedBy = req.user?.id || internship.completedBy;
+        internship.completedByName = signerUser?.name || internship.completedByName || null;
+        internship.completedByEmail = signerUser?.email || internship.completedByEmail || null;
+
+        // Also mark as closed so students cannot apply.
+        internship.isClosed = true;
+        internship.closedAt = internship.closedAt || new Date();
+
+        await internship.save();
+
+        // When faculty marks internship completed, generate completion certificates
+        // only for students selected by faculty (Application.status === 'approved').
+        const completedAt = internship.completedAt || new Date();
+        const signedBy = {
+            name: internship.completedByName || undefined,
+            email: internship.completedByEmail || undefined
+        };
+        const certDir = path.join('uploads', 'certificates');
+        if (!fsSync.existsSync(certDir)) {
+            fsSync.mkdirSync(certDir, { recursive: true });
+        }
+
+        const approvedApps = await Application.find({
+            internship: internship._id,
+            status: 'approved'
+        })
+            .populate('student', 'name email department')
+            .populate('internship', 'title company');
+
+        for (const app of approvedApps) {
+            const fileName = `internship-completion-${app._id}.pdf`;
+            const outputPath = path.join(certDir, fileName);
+            const outputPathForUrl = outputPath.replace(/\\/g, '/');
+            await generateInternshipCompletionCertificatePdf({
+                outputPath,
+                certificateId: String(app._id),
+                completedAt,
+                student: {
+                    name: app.student?.name,
+                    email: app.student?.email,
+                    department: app.student?.department
+                },
+                internship: {
+                    title: app.internship?.title,
+                    company: app.internship?.company
+                },
+                signedBy,
+                signedAt: completedAt
+            });
+
+            app.completedAt = completedAt;
+            app.internshipCompletionCertificate = outputPathForUrl;
+            await app.save();
         }
 
         res.json(internship);

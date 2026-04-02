@@ -24,6 +24,11 @@ export interface Internship {
   brochureSnapshot?: string | null;
   deadlineAt: string;
   isClosed: boolean;
+  isCompleted?: boolean;
+  completedAt?: string | null;
+  // Used for certificate signing display/verification
+  completedByName?: string | null;
+  completedByEmail?: string | null;
   notificationArchivedAt?: string | null;
   createdAt: string;
 }

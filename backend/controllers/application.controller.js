@@ -1,11 +1,12 @@
 const Application = require('../models/Application');
 const Internship = require('../models/Internship');
+const User = require('../models/User');
 const { extractPdfText } = require('../utils/pdfExtractor');
 const { analyzeResume } = require('../utils/geminiAI');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const path = require('path');
-const PDFDocument = require('pdfkit');
+const { generateInternshipCompletionCertificatePdf } = require('../utils/certificateGenerator');
 
 // @desc    Apply for internship
 // @route   POST /api/applications/:internshipId
@@ -32,6 +33,24 @@ exports.applyForInternship = async (req, res) => {
         // Check if valid role
         if (req.user.role !== 'student') {
             return res.status(403).json({ message: 'Only students can apply' });
+        }
+
+        // Department restriction: only students from the same department can apply.
+        // Treat missing/"N/A" department on internship as open to all.
+        const normalizeDept = (v) => String(v || '').trim().toLowerCase();
+        const internshipDept = normalizeDept(internship.department);
+        const student = await User.findById(req.user.id).select('department');
+        const studentDept = normalizeDept(student?.department);
+        const deptRestricted = internshipDept && internshipDept !== 'n/a';
+        if (deptRestricted && !studentDept) {
+            return res.status(400).json({
+                message: 'Please update your department in profile before applying'
+            });
+        }
+        if (deptRestricted && internshipDept !== studentDept) {
+            return res.status(403).json({
+                message: `Only ${internship.department} department students can apply for this internship`
+            });
         }
 
         // Check if already applied
@@ -330,63 +349,54 @@ exports.uploadCertificate = async (req, res) => {
         // (Do not overwrite `application.certificate` / `certificateStatus` used for faculty verification.)
         if (!application.internshipCompletionCertificate) {
             const appForCert = await Application.findById(application._id)
-                .populate('student', 'name email')
-                .populate('internship', 'title company location duration department description requiredSkills');
+                .populate('student', 'name email department')
+                .populate('internship', 'title company location duration department description requiredSkills isCompleted completedAt completedByName completedByEmail');
 
             if (appForCert && appForCert.status === 'approved') {
-                if (!appForCert.internshipCompletionCertificate) {
-                    const certDir = path.join('uploads', 'certificates');
-                    if (!fsSync.existsSync(certDir)) {
-                        fsSync.mkdirSync(certDir, { recursive: true });
-                    }
-
-                    const fileName = `internship-completion-${appForCert._id}.pdf`;
-                    const outputPath = path.join(certDir, fileName);
-                    const outputPathForUrl = outputPath.replace(/\\/g, '/');
-
-                    const doc = new PDFDocument({ size: 'A4', margin: 50 });
-                    const stream = fsSync.createWriteStream(outputPath);
-                    doc.pipe(stream);
-
-                    const studentName = appForCert.student?.name || 'Student';
-                    const studentEmail = appForCert.student?.email || '';
-                    const internshipTitle = appForCert.internship?.title || 'Internship';
-                    const company = appForCert.internship?.company || '';
-                    const completedAt = new Date();
-
-                    doc.fontSize(20).text('Internship Completion Certificate', { align: 'center' });
-                    doc.moveDown(2);
-
-                    doc.fontSize(12).text(`This is to certify that`, { align: 'center' });
-                    doc.moveDown(0.5);
-                    doc.fontSize(16).text(`${studentName}`, { align: 'center' });
-                    doc.moveDown(0.5);
-                    doc.fontSize(12).text(`has successfully completed the internship`, { align: 'center' });
-                    doc.moveDown(0.5);
-
-                    doc.fontSize(14).text(`${internshipTitle}`, { align: 'center' });
-                    if (company) doc.fontSize(12).text(`Company: ${company}`, { align: 'center' });
-
-                    doc.moveDown(2);
-                    doc.fontSize(12).text(`Date: ${completedAt.toLocaleDateString()}`, { align: 'center' });
-                    if (studentEmail) doc.fontSize(10).text(`Email: ${studentEmail}`, { align: 'center' });
-
-                    doc.moveDown(2);
-                    doc.fontSize(11).text('Faculty / Program Coordinator', { align: 'center' });
-                    doc.moveDown(3);
-                    doc.fontSize(11).text('Signature', { align: 'center' });
-
-                    doc.end();
-
-                    await new Promise((resolve, reject) => {
-                        stream.on('finish', resolve);
-                        stream.on('error', reject);
-                    });
-
-                    appForCert.completedAt = completedAt;
-                    appForCert.internshipCompletionCertificate = outputPathForUrl;
-                    await appForCert.save();
+                // Only generate internship completion certificates after faculty marks the internship completed.
+                if (!appForCert.internship?.isCompleted) {
+                    return res.json(responseApplication);
                 }
+
+                // Always (re)generate the internship completion certificate PDF so
+                // updated templates/signature blocks are reflected immediately.
+                const certDir = path.join('uploads', 'certificates');
+                if (!fsSync.existsSync(certDir)) {
+                    fsSync.mkdirSync(certDir, { recursive: true });
+                }
+
+                const fileName = `internship-completion-${appForCert._id}.pdf`;
+                const outputPath = path.join(certDir, fileName);
+                const outputPathForUrl = outputPath.replace(/\\/g, '/');
+
+                const completedAt = appForCert.internship?.completedAt
+                    ? new Date(appForCert.internship.completedAt)
+                    : new Date();
+
+                // Generate the certificate using the shared template function.
+                await generateInternshipCompletionCertificatePdf({
+                    outputPath,
+                    certificateId: String(appForCert._id),
+                    completedAt,
+                    student: {
+                        name: appForCert.student?.name,
+                        email: appForCert.student?.email,
+                        department: appForCert.student?.department
+                    },
+                    internship: {
+                        title: appForCert.internship?.title,
+                        company: appForCert.internship?.company
+                    },
+                    signedBy: {
+                        name: appForCert.internship?.completedByName || undefined,
+                        email: appForCert.internship?.completedByEmail || undefined
+                    },
+                    signedAt: completedAt
+                });
+
+                appForCert.completedAt = completedAt;
+                appForCert.internshipCompletionCertificate = outputPathForUrl;
+                await appForCert.save();
                 responseApplication = appForCert;
             }
         }
@@ -533,8 +543,8 @@ exports.archiveNotificationsBulk = async (req, res) => {
 exports.generateCompletionCertificate = async (req, res) => {
     try {
         const application = await Application.findById(req.params.id)
-            .populate('student', 'name email')
-            .populate('internship', 'title company location duration department description requiredSkills');
+            .populate('student', 'name email department')
+            .populate('internship', 'title company location duration department description requiredSkills isCompleted completedAt completedByName completedByEmail');
 
         if (!application) return res.status(404).json({ message: 'Application not found' });
         if (application.student.toString() !== req.user.id) return res.status(401).json({ message: 'Not authorized' });
@@ -544,10 +554,11 @@ exports.generateCompletionCertificate = async (req, res) => {
             return res.status(400).json({ message: 'Internship must be approved before completion.' });
         }
 
-        // If already generated, just return it.
-        if (application.internshipCompletionCertificate) {
-            return res.json(application);
+        if (!application.internship?.isCompleted) {
+            return res.status(400).json({ message: 'Internship completion certificate can only be generated after faculty marks the internship completed.' });
         }
+
+        // Always (re)generate here so students can get the latest certificate template/signature.
 
         const certDir = path.join('uploads', 'certificates');
         if (!fsSync.existsSync(certDir)) {
@@ -558,45 +569,25 @@ exports.generateCompletionCertificate = async (req, res) => {
         const outputPath = path.join(certDir, fileName);
         const outputPathForUrl = outputPath.replace(/\\/g, '/');
 
-        const doc = new PDFDocument({ size: 'A4', margin: 50 });
-        const stream = fsSync.createWriteStream(outputPath);
-        doc.pipe(stream);
-
-        const studentName = application.student?.name || 'Student';
-        const studentEmail = application.student?.email || '';
-        const internshipTitle = application.internship?.title || 'Internship';
-        const company = application.internship?.company || '';
-        const completedAt = new Date();
-
-        doc.fontSize(20).text('Internship Completion Certificate', { align: 'center' });
-        doc.moveDown(2);
-
-        doc.fontSize(12).text(`This is to certify that`, { align: 'center' });
-        doc.moveDown(0.5);
-        doc.fontSize(16).text(`${studentName}`, { align: 'center' });
-        doc.moveDown(0.5);
-        doc.fontSize(12).text(`has successfully completed the internship`, { align: 'center' });
-        doc.moveDown(0.5);
-
-        doc.fontSize(14).text(`${internshipTitle}`, { align: 'center' });
-        if (company) {
-            doc.fontSize(12).text(`Company: ${company}`, { align: 'center' });
-        }
-
-        doc.moveDown(2);
-        doc.fontSize(12).text(`Date: ${completedAt.toLocaleDateString()}`, { align: 'center' });
-        if (studentEmail) doc.fontSize(10).text(`Email: ${studentEmail}`, { align: 'center' });
-
-        doc.moveDown(2);
-        doc.fontSize(11).text('Faculty / Program Coordinator', { align: 'center' });
-        doc.moveDown(3);
-        doc.fontSize(11).text('Signature', { align: 'center' });
-
-        doc.end();
-
-        await new Promise((resolve, reject) => {
-            stream.on('finish', resolve);
-            stream.on('error', reject);
+        const completedAt = application.internship?.completedAt ? new Date(application.internship.completedAt) : new Date();
+        await generateInternshipCompletionCertificatePdf({
+            outputPath,
+            certificateId: String(application._id),
+            completedAt,
+            student: {
+                name: application.student?.name,
+                email: application.student?.email,
+                department: application.student?.department
+            },
+            internship: {
+                title: application.internship?.title,
+                company: application.internship?.company
+            },
+            signedBy: {
+                name: application.internship?.completedByName || undefined,
+                email: application.internship?.completedByEmail || undefined
+            },
+            signedAt: completedAt
         });
 
         application.completedAt = completedAt;
