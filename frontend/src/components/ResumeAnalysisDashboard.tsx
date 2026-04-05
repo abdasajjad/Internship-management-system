@@ -230,7 +230,7 @@ export function ResumeAnalysisDashboard({
           transition={{ delay: 0.5 }}
           className="bg-indigo-50 rounded-2xl border border-indigo-200 p-4 shadow-sm"
         >
-          <p className="text-sm text-indigo-900">
+          <p className="text-sm text-indigo-900 leading-relaxed whitespace-pre-wrap break-words">
             <span className="font-semibold">Analysis: </span>
             {analysis.summary}
           </p>

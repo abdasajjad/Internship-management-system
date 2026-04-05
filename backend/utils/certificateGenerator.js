@@ -3,6 +3,23 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+/** Title-case a person's name (each word; supports hyphenated parts). */
+function formatDisplayName(name) {
+  if (name == null || name === '') return '';
+  const s = String(name).trim();
+  if (!s) return '';
+  return s
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) =>
+      word
+        .split('-')
+        .map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1).toLowerCase() : ''))
+        .join('-')
+    )
+    .join(' ');
+}
+
 /**
  * Generate an internship completion certificate PDF.
  * @param {Object} params
@@ -64,11 +81,12 @@ exports.generateInternshipCompletionCertificatePdf = async ({
   doc.fillColor('#111827').fontSize(12).text('This is to certify that', { align: 'center' });
 
   doc.moveDown(0.7);
+  const studentDisplayName = formatDisplayName(student?.name != null ? student.name : '') || 'Student';
   doc
     .fillColor('#111827')
     .fontSize(22)
     .font('Helvetica-Bold')
-    .text(student?.name || 'Student', { align: 'center' });
+    .text(studentDisplayName, { align: 'center' });
 
   doc.moveDown(0.6);
   doc.fillColor('#374151').fontSize(12).font('Helvetica').text('has successfully completed the internship', { align: 'center' });
@@ -108,13 +126,14 @@ exports.generateInternshipCompletionCertificatePdf = async ({
   doc.restore();
   doc.moveDown(0.5);
 
-  const signerName = signedBy?.name || 'Faculty / Program Coordinator';
+  const signerNameRaw = signedBy?.name || 'Faculty / Program Coordinator';
+  const signerDisplayName = formatDisplayName(signerNameRaw) || signerNameRaw;
   const signerEmail = signedBy?.email || null;
   const sigDate = signedAt instanceof Date ? signedAt : (completedAt instanceof Date ? completedAt : new Date());
-  const verificationPayload = `${certificateId}|${signerEmail || signerName}|${sigDate.toISOString()}`;
+  const verificationPayload = `${certificateId}|${signerEmail || signerNameRaw}|${sigDate.toISOString()}`;
   const verificationCode = crypto.createHash('sha256').update(verificationPayload).digest('hex').slice(0, 14).toUpperCase();
 
-  doc.fillColor('#374151').fontSize(11).text(`Digitally signed by ${signerName}`, { align: 'center' });
+  doc.fillColor('#374151').fontSize(11).text(`Digitally signed by ${signerDisplayName}`, { align: 'center' });
   if (signerEmail) {
     doc.fillColor('#6b7280').fontSize(9).text(`${signerEmail}`, { align: 'center' });
   }

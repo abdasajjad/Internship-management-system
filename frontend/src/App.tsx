@@ -852,8 +852,16 @@ function AuthScreen({ onLogin }: { onLogin: (user: User) => void }) {
 function Layout({ user, onLogout, notifications = [], onClearNotifications, isChangePasswordOpen, onChangePasswordToggle, onPasswordChanged, children }: { user: User, onLogout: () => void, notifications?: { id: string; text: string; variant: 'success' | 'danger' | 'warning' }[], onClearNotifications?: () => void, isChangePasswordOpen: boolean, onChangePasswordToggle: () => void, onPasswordChanged: () => void, children: React.ReactNode }) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [readNotifications, setReadNotifications] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem(`notifications-read-${user.id}`);
-    return new Set(saved ? JSON.parse(saved) : []);
+    // Guard against cases where `user.id` isn't ready yet or stored value isn't valid JSON.
+    const key = user?.id ? `notifications-read-${user.id}` : null;
+    const saved = key ? localStorage.getItem(key) : null;
+    if (!saved) return new Set();
+    try {
+      const parsed = JSON.parse(saved);
+      return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      return new Set();
+    }
   });
 
   useEffect(() => {
@@ -951,7 +959,7 @@ function Layout({ user, onLogout, notifications = [], onClearNotifications, isCh
                   <p className="text-xs text-slate-500 capitalize">{user.role}</p>
                 </div>
                 <div className="h-9 w-9 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-200">
-                  <span className="text-sm font-bold text-indigo-700">{user.name.charAt(0)}</span>
+                  <span className="text-sm font-bold text-indigo-700">{user?.name?.charAt(0) || '?'}</span>
                 </div>
               </div>
               <div className="h-6 w-px bg-slate-200" />
@@ -1372,7 +1380,7 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
             setUploadedQuickAnalysis({
               score: typeof quickData.score === 'number' ? quickData.score : null,
               summary: quickData.summary || '',
-              improvements: Array.isArray(quickData.improvements) ? quickData.improvements.slice(0, 3) : []
+              improvements: Array.isArray(quickData.improvements) ? quickData.improvements.slice(0, 5) : []
             });
           }
         } catch (aiErr) {
@@ -1770,11 +1778,10 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                     const certPath = selectedApplication.internshipCompletionCertificate;
                     if (!certPath) return;
 
-                    // Regenerate on view so the certificate always includes the
-                    // latest signature/verification block.
-                    const updated = await completeInternship(selectedApplication.id);
-                    const updatedCertPath = updated?.internshipCompletionCertificate || certPath;
-                    window.open(`/${updatedCertPath}`, '_blank', 'noopener,noreferrer');
+                    // The certificate already exists; just open it.
+                    // (Regenerating calls a protected endpoint and can show a
+                    // misleading "Not authorized" toast even though viewing works.)
+                    window.open(`/${certPath}`, '_blank', 'noopener,noreferrer');
                   }}
                   disabled={isGeneratingCertificate}
                   className="block w-full text-center text-sm font-medium py-2.5 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-60"
@@ -1898,7 +1905,21 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                   <div>
                     <button
                       className="w-full text-left p-4 min-h-[150px] flex items-start justify-between gap-4 hover:bg-slate-50 transition-colors"
-                      onClick={() => setSelectedApplicationId(app.id)}
+                      onClick={() => {
+                        setSelectedApplicationId(app.id);
+                        // If the saved AI feedback looks like it was hard-truncated,
+                        // auto-refresh it so the full sentence is shown without a button.
+                        const feedback = app.aiFeedback;
+                        const looksHardTruncated = typeof feedback === 'string'
+                          && feedback.length >= 190
+                          && !/[.!?]$/.test(feedback.trim());
+                        // Old backend limited both positives/negatives to exactly 3 items.
+                        // Trigger one auto-refresh when both are still at that old limit.
+                        const looksOldBulletLimit = (app.aiPros?.length ?? 0) === 3 && (app.aiCons?.length ?? 0) === 3;
+                        if ((looksHardTruncated || looksOldBulletLimit) && app.aiScore !== null && analyzingAppId !== app.id) {
+                          runAiMatch(app, internship);
+                        }
+                      }}
                     >
                       <div className="flex items-start gap-3 min-w-0">
                         <div className="h-10 w-10 rounded-lg bg-indigo-50 flex items-center justify-center shrink-0">
@@ -1945,7 +1966,7 @@ function StudentDashboard({ user, onUpdateUser, onNotificationsChange }: { user:
                         </p>
                         {app.aiCons?.length ? (
                           <ul className="space-y-1 list-disc list-inside">
-                            {app.aiCons.slice(0, 3).map((con, idx) => (
+                            {app.aiCons.slice(0, 5).map((con, idx) => (
                               <li key={idx} className="text-xs text-rose-700">
                                 <p className="inline">{cleanAiText(con)}</p>
                               </li>

@@ -54,7 +54,8 @@ ${resumeText}
 Position Requirements:
 ${internship.requiredSkills?.join(', ') || 'Not specified'}
 
-IMPORTANT: For strengths and improvements, provide SHORT and CRISP bullet points (3-5 words max per point). Be very concise and specific.
+IMPORTANT: For strengths and improvements, provide SHORT and CRISP bullet points (3-5 words max per point).
+Provide up to 5 strengths and up to 5 improvements. Be very concise and specific.
 
 Respond with ONLY valid JSON (no markdown, no code blocks, no extra text):
 {
@@ -91,9 +92,10 @@ Respond with ONLY valid JSON (no markdown, no code blocks, no extra text):
         
         return {
             score: Math.min(100, Math.max(0, analysis.score || 50)),
-            summary: (analysis.summary || 'Analysis complete').substring(0, 200),
-            strengths: Array.isArray(analysis.strengths) ? analysis.strengths.slice(0, 3).map(s => String(s).substring(0, 45)) : [],
-            improvements: Array.isArray(analysis.improvements) ? analysis.improvements.slice(0, 3).map(i => String(i).substring(0, 45)) : [],
+            // Do not hard-truncate the model summary; the prompt already limits length.
+            summary: String(analysis.summary || 'Analysis complete').trim(),
+            strengths: Array.isArray(analysis.strengths) ? analysis.strengths.slice(0, 5).map(s => String(s).substring(0, 45)) : [],
+            improvements: Array.isArray(analysis.improvements) ? analysis.improvements.slice(0, 5).map(i => String(i).substring(0, 45)) : [],
             recommendation: analysis.recommendation || 'moderate_match'
         };
     } catch (err) {

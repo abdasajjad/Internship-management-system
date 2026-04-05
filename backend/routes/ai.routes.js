@@ -5,6 +5,8 @@ const crypto = require('crypto');
 const AiCache = require('../models/AiCache');
 const { analyzeResume } = require('../utils/geminiAI');
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Used to invalidate cached AI payloads when we change response shaping/truncation rules.
+const SUMMARY_PAYLOAD_VERSION = 'v3-more-bullets';
 
 const buildCacheKey = (type, payload) => {
     const hash = crypto
@@ -55,7 +57,8 @@ router.post('/analyze-resume', async (req, res) => {
 
         const cacheKey = buildCacheKey('analyze-resume', {
             resumeText: String(resumeText || '').trim(),
-            model: GEMINI_MODEL
+            model: GEMINI_MODEL,
+            summaryPayloadVersion: SUMMARY_PAYLOAD_VERSION
         });
 
         const cached = await AiCache.findOne({ key: cacheKey });
@@ -96,7 +99,7 @@ router.post('/analyze-resume', async (req, res) => {
                 .split('\n')
                 .map(l => l.trim())
                 .filter(l => l.startsWith('- '))
-                .slice(0, 3)
+                .slice(0, 5)
                 .map(l => l.replace(/^-+\s?/, '').trim());
 
             const payload = {
@@ -112,6 +115,7 @@ router.post('/analyze-resume', async (req, res) => {
             const cacheKey = buildCacheKey('analyze-resume', {
                 resumeText: String(resumeText || '').trim(),
                 model: GEMINI_MODEL,
+                summaryPayloadVersion: SUMMARY_PAYLOAD_VERSION,
                 fallback: true
             });
 
@@ -146,7 +150,8 @@ router.post('/match-resume', async (req, res) => {
             internshipTitle: String(internshipTitle || '').trim(),
             internshipDescription: String(internshipDescription || '').trim(),
             requiredSkills: Array.isArray(requiredSkills) ? requiredSkills : String(requiredSkills || '').split(',').map(s => s.trim()).filter(Boolean),
-            model: GEMINI_MODEL
+            model: GEMINI_MODEL,
+            summaryPayloadVersion: SUMMARY_PAYLOAD_VERSION
         });
 
         const cached = await AiCache.findOne({ key: cacheKey });
@@ -171,7 +176,8 @@ Required Skills: ${skillsStr}
 Resume:
 ${resumeText}
 
-IMPORTANT: For strengths and improvements, provide SHORT and CRISP bullet points (3-5 words max per point). Be very concise and specific.
+IMPORTANT: For strengths and improvements, provide SHORT and CRISP bullet points (3-5 words max per point).
+Provide up to 5 strengths and up to 5 improvements. Be very concise and specific.
 
 Respond with ONLY valid JSON (no markdown, no code blocks, no extra text):
 {
@@ -203,9 +209,10 @@ Respond with ONLY valid JSON (no markdown, no code blocks, no extra text):
             const result = JSON.parse(jsonMatch[0]);
             const normalizedResult = {
                 score: Math.min(100, Math.max(0, result.score || 50)),
-                summary: (result.summary || 'Analysis complete').substring(0, 200),
-                strengths: Array.isArray(result.strengths) ? result.strengths.slice(0, 3).map(s => String(s).substring(0, 45)) : [],
-                improvements: Array.isArray(result.improvements) ? result.improvements.slice(0, 3).map(i => String(i).substring(0, 45)) : [],
+                // Do not hard-truncate the model summary; the prompt already limits length.
+                summary: String(result.summary || 'Analysis complete').trim(),
+                strengths: Array.isArray(result.strengths) ? result.strengths.slice(0, 5).map(s => String(s).substring(0, 45)) : [],
+                improvements: Array.isArray(result.improvements) ? result.improvements.slice(0, 5).map(i => String(i).substring(0, 45)) : [],
                 recommendation: result.recommendation || 'moderate_match'
             };
             await AiCache.findOneAndUpdate(
